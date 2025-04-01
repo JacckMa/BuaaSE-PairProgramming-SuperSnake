@@ -264,33 +264,49 @@ fn get_enemy_scores_with_mapping(
 }
 
 /// 计算果子得分：若吃到果子则 +100，否则按曼哈顿距离扣分；对争夺果子和敌蛇预测优势情况加大扣分
-/// 计算果子得分：若吃到果子则 +100，否则按曼哈顿距离扣分；
-/// 如果发现敌蛇到某个果子的距离小于或等于我方到果子的距离，则对该果子施加额外惩罚，
 fn compute_food_score(
     new_head: (i32, i32),
     food_coords: &Vec<(i32, i32)>,
-    _contested_food: &Vec<bool>, // 此处保留参数，但在本修改中未单独使用
+    contested_food: &Vec<bool>,
     enemy_dist: &Vec<i32>,
     eat: bool
 ) -> f32 {
     let mut score = 0.0;
+    // 根据游戏模式确定中心位置
+    let center = GAME_MODE.with(|m| {
+        if let Some(mode) = *m.borrow() {
+            if mode == 1 {
+                (2.5, 2.5)
+            } else if mode == 3 {
+                (4.5, 4.5)
+            } else {
+                (2.5, 2.5)
+            }
+        } else {
+            (2.5, 2.5)
+        }
+    });
+    
     if eat {
         score += 100.0;
     } else if !food_coords.is_empty() {
         let mut min_dist = i32::MAX;
         for (i, &(fx, fy)) in food_coords.iter().enumerate() {
-            let my_dist = (new_head.0 - fx).abs() + (new_head.1 - fy).abs();
-            let enemy_d = enemy_dist.get(i).copied().unwrap_or(i32::MAX);
-            if enemy_d <= my_dist {
-                // 敌蛇距离更近或同样距离
-                let diff = my_dist - enemy_d; // 差值越大，惩罚越重
-                let penalty = my_dist as f32 * (1.0 + diff as f32);
-                score += -penalty;
+            let dist = (new_head.0 - fx).abs() + (new_head.1 - fy).abs();
+            // 计算果子与中心的曼哈顿距离（以浮点数计算）
+            let center_dist = ((fx as f64) - center.0).abs() + ((fy as f64) - center.1).abs();
+            // 如果果子靠近中心（距离小于1.5），则增加额外权重 bonus
+            let bonus = if center_dist < 1.5 { 10.0 } else { 0.0 };
+            
+            if contested_food.get(i).copied().unwrap_or(false) {
+                score += -3.0 * dist as f32 + bonus;
             } else {
-                if my_dist < min_dist {
-                    min_dist = my_dist;
+                if dist < min_dist {
+                    min_dist = dist;
                 }
-                score += -my_dist as f32;
+                if enemy_dist.get(i).copied().unwrap_or(i32::MAX) < dist {
+                    score += -dist as f32 + bonus;
+                }
             }
         }
         if min_dist != i32::MAX {
@@ -299,7 +315,6 @@ fn compute_food_score(
     }
     score
 }
-
 
 /// 使用洪水填充计算从 start 出发的可活动区域面积
 fn compute_free_space(start: (i32, i32), obstacles: &Vec<bool>, n: i32, board_size: usize) -> i32 {
@@ -372,21 +387,13 @@ fn compute_survival_score(new_head: (i32, i32), new_body: &Vec<(i32, i32)>, othe
             queue.push((nx, ny));
         }
     }
+    // 修复两个编译错误：
     if space < my_length as i32 {
         survival_score -= 100.0;
     } else {
-        survival_score += space as f32;
+        survival_score += 50.0 * (space as f32).sqrt(); // 1. 使用f32的sqrt方法 2. 改为浮点运算
     }
-    for &(hx, hy, h_len) in other_heads {
-        let dist = (new_head.0 - hx).abs() + (new_head.1 - hy).abs();
-        if dist == 1 {
-            if h_len >= my_length {
-                survival_score -= 50.0;
-            } else {
-                survival_score -= 10.0;
-            }
-        }
-    }
+
     survival_score
 }
 
@@ -413,10 +420,20 @@ fn compute_aggression_score(
         if LOG_ENABLED {
             console::log_1(&format!("[AGGRESSION] My score: {}, Enemy score: {}", my_cumulative, enemy_score).into());
         }
+        // TODO：这里的阈值需要调整 >= ??
         if my_cumulative > enemy_score {
             let dist = (new_head.0 - hx).abs() + (new_head.1 - hy).abs();
-            if dist == 1 {
-                aggression_score += 20.0;
+            if dist <= 2 && !dangerous[pos_to_index(new_head.0, new_head.1, board_size)] {
+                // 根据游戏模式调整奖励值
+                GAME_MODE.with(|mode| {
+                    if let Some(mode) = *mode.borrow() {
+                        if mode == 3 {
+                            aggression_score += 100.0; // 4蛇模式奖励100
+                        } else {
+                            aggression_score += 1000.0; // 其他模式奖励1000
+                        }
+                    }
+                });
             }
         }
     }
@@ -457,7 +474,6 @@ pub fn greedy_snake_step(
         if mode.is_none() {
             *mode = Some(_snake_num);
         }
-        console::log_1(&format!("[GAME_MODE] Initialized: {:?}", *mode).into());
     });
     
 
@@ -527,9 +543,23 @@ pub fn greedy_snake_step(
     // 定义方向向量：0:上, 1:左, 2:下, 3:右
     let dir_vecs = [(0, 1), (-1, 0), (0, -1), (1, 0)];
     // 权重设置
-    let score_weight: f32 = 1.0;
-    let survival_weight: f32 = 3.0;
-    let aggression_weight: f32 = 1.0;
+     // 权重设置
+     let score_weight: f32 = 5.0;
+     let mut survival_weight: f32 = 3.0;
+     let mut aggression_weight: f32 = 1.0;
+ 
+     // 根据游戏模式调整权重
+     GAME_MODE.with(|mode| {
+         if let Some(mode) = *mode.borrow() {
+             if mode == 3 {
+                 survival_weight = 10.0; // 4蛇模式加大生存权重
+             } 
+             if _snake_num == 2 {
+                 aggression_weight = 3.0; // 1v1模式且_snake_num为2时加大攻击权重
+             }
+         }
+     });
+ 
     let mut best_dir: i32 = 0;
     let mut best_score: f32 = -1e9;
     for (dir_idx, (dx, dy)) in dir_vecs.iter().enumerate() {
