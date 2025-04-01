@@ -1,5 +1,5 @@
 // Import snake decision functions
-import { greedy_snake_step as snake1 } from './t3-snake-1-{PL}/pkg/snake.js';
+import { greedy_snake_step as snake1 } from './t3-snake-1-800/pkg/snake.js';
 import { greedy_snake_step as snake2 } from './t3-snake-{num}-{PL}/pkg/snake.js';
 import { greedy_snake_step as snake3 } from './t3-snake-{num}-{PL}/pkg/snake.js';
 import { greedy_snake_step as snake4 } from './t3-snake-{num}-{PL}/pkg/snake.js';

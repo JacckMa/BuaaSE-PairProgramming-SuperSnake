@@ -1,0 +1,1 @@
+/Users/bytedance/BuaaSE-PairProgramming-SuperSnake/T3/t3-snake-1-T800/target/wasm32-unknown-unknown/release/t3_snake_1_T800.wasm: /Users/bytedance/BuaaSE-PairProgramming-SuperSnake/T3/t3-snake-1-T800/src/lib.rs
