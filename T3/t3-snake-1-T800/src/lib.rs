@@ -544,7 +544,7 @@ pub fn greedy_snake_step(
     let dir_vecs = [(0, 1), (-1, 0), (0, -1), (1, 0)];
     // 权重设置
      // 权重设置
-     let score_weight: f32 = 5.0;
+     let score_weight: f32 = 1.0;
      let mut survival_weight: f32 = 3.0;
      let mut aggression_weight: f32 = 1.0;
  

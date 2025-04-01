@@ -4,7 +4,7 @@
   "description": "",
   "main": "test.js",
   "scripts": {
-    "submit-test": "node test.js",
+    "submit-test": "node test-2.js",
     "display-test": "node test-tui.js"
   },
   "type": "module",
