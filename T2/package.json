@@ -4,7 +4,7 @@
   "description": "",
   "main": "test.js",
   "scripts": {
-    "submit-test": "node test.js"
+    "submit-test": "node test_2.js"
   },
   "type": "module",
   "author": "BUAAASE-2025",
