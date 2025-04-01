@@ -347,12 +347,20 @@ fn compute_free_space(start: (i32, i32), obstacles: &Vec<bool>, n: i32, board_si
     area
 }
 
-/// 计算生存得分：使用洪水填充计算新头的可活动区域，若区域小于蛇体长度则扣分；对邻近敌蛇头额外扣分
-fn compute_survival_score(new_head: (i32, i32), new_body: &Vec<(i32, i32)>, other_snakes_coords: &Vec<Vec<(i32, i32)>>, other_heads: &Vec<(i32, i32, usize)>, n: i32, board_size: usize, my_length: usize) -> f32 {
-    let mut survival_score = 0.0;
-    let mut space = 0;
-    let mut visited = vec![false; board_size * board_size];
-    let mut queue = Vec::with_capacity(board_size * board_size);
+/// 重写后的生存得分函数：
+/// 使用洪水填充计算新头的可活动区域；
+/// 同时检查从新头到蛇尾是否存在通路（允许蛇尾位置视为可通行），
+/// 如果无法到达蛇尾，则返回极低得分，避免走入死路。
+fn compute_survival_score(
+    new_head: (i32, i32),
+    new_body: &Vec<(i32, i32)>,
+    other_snakes_coords: &Vec<Vec<(i32, i32)>>,
+    _other_heads: &Vec<(i32, i32, usize)>,
+    n: i32,
+    board_size: usize,
+    my_length: usize
+) -> f32 {
+    // 构建障碍地图：包括其他蛇和我方蛇的新身体（全部视为障碍）
     let mut static_block = vec![false; board_size * board_size];
     for snake_body in other_snakes_coords {
         for &(bx, by) in snake_body {
@@ -368,10 +376,14 @@ fn compute_survival_score(new_head: (i32, i32), new_body: &Vec<(i32, i32)>, othe
             static_block[idx] = true;
         }
     }
+    
+    // 计算从 new_head 出发的自由区域面积
+    let mut space = 0;
+    let mut visited = vec![false; board_size * board_size];
+    let mut queue = Vec::with_capacity(board_size * board_size);
     queue.push(new_head);
     let start_idx = pos_to_index(new_head.0, new_head.1, board_size);
     visited[start_idx] = true;
-    static_block[start_idx] = true;
     while let Some((cx, cy)) = queue.pop() {
         space += 1;
         let neighbors = [(cx, cy+1), (cx-1, cy), (cx, cy-1), (cx+1, cy)];
@@ -380,28 +392,60 @@ fn compute_survival_score(new_head: (i32, i32), new_body: &Vec<(i32, i32)>, othe
                 continue;
             }
             let ni = pos_to_index(nx, ny, board_size);
-            if visited[ni] || static_block[ni] {
-                continue;
+            if !visited[ni] && !static_block[ni] {
+                visited[ni] = true;
+                queue.push((nx, ny));
             }
-            visited[ni] = true;
-            queue.push((nx, ny));
         }
     }
-    // 修复两个编译错误：
-    if space < my_length as i32 {
-        survival_score -= 100.0;
+    
+    // 根据自由空间面积计算基础生存得分
+    let mut survival_score = if space < my_length as i32 {
+        -100.0
     } else {
-        survival_score += 50.0 * (space as f32).sqrt(); // 1. 使用f32的sqrt方法 2. 改为浮点运算
+        50.0 * (space as f32).sqrt()
+    };
+    
+    // 检查是否存在一条路径从 new_head 到达蛇尾（new_body 最后一个坐标）
+    // 注意：搜索时允许蛇尾位置视为可通过，因为蛇尾在下一回合可能腾出位置。
+    let tail = new_body.last().unwrap();
+    let mut tail_reachable = false;
+    let mut visited_tail = vec![false; board_size * board_size];
+    let mut queue_tail = Vec::with_capacity(board_size * board_size);
+    queue_tail.push(new_head);
+    visited_tail[pos_to_index(new_head.0, new_head.1, board_size)] = true;
+    while let Some((cx, cy)) = queue_tail.pop() {
+        if (cx, cy) == *tail {
+            tail_reachable = true;
+            break;
+        }
+        let neighbors = [(cx, cy+1), (cx-1, cy), (cx, cy-1), (cx+1, cy)];
+        for &(nx, ny) in &neighbors {
+            if nx < 1 || nx > n || ny < 1 || ny > n {
+                continue;
+            }
+            let ni = pos_to_index(nx, ny, board_size);
+            // 允许目标为蛇尾，即使其被标记为障碍
+            if !visited_tail[ni] && (!static_block[ni] || (nx, ny) == *tail) {
+                visited_tail[ni] = true;
+                queue_tail.push((nx, ny));
+            }
+        }
     }
-
+    
+    // 如果无法通到蛇尾，则视为死路，返回较大负分
+    if !tail_reachable {
+        return -1000.0;
+    }
+    
     survival_score
 }
 
 /// 重新设计的进攻得分函数：
 /// 场景1：对于每个敌蛇，根据全局累计目标得分（SNAKE_SCORES）与我方累计目标得分（MY_SCORE）比较；
-// 如果我方累计得分高，并且我方新头与该敌蛇头相邻，则奖励额外分（同归于尽奖励）；
+/// 如果我方累计得分高，并且我方新头与该敌蛇头相邻，则奖励额外分（同归于尽奖励）；
 /// 场景2：对于每个敌蛇，如果我方新头靠近（距离≤2），模拟阻断后计算敌蛇自由空间，
-// 若自由空间低于阈值，则奖励 (阈值 - 自由空间)/距离 得分。
+/// 若自由空间低于阈值，则奖励 (阈值 - 自由空间)/距离 得分。
 fn compute_aggression_score(
     new_head: (i32, i32),
     other_heads: &Vec<(i32, i32, usize)>,
@@ -467,15 +511,13 @@ pub fn greedy_snake_step(
     foods: Vec<i32>,
     round: i32
 ) -> i32 {
-     // 初始化游戏模式
-
+    // 初始化游戏模式
     GAME_MODE.with(|mode| {
         let mut mode = mode.borrow_mut();
         if mode.is_none() {
             *mode = Some(_snake_num);
         }
     });
-    
 
     let board_size = n as usize;
     if LOG_ENABLED {
@@ -543,23 +585,22 @@ pub fn greedy_snake_step(
     // 定义方向向量：0:上, 1:左, 2:下, 3:右
     let dir_vecs = [(0, 1), (-1, 0), (0, -1), (1, 0)];
     // 权重设置
-     // 权重设置
-     let score_weight: f32 = 1.0;
-     let mut survival_weight: f32 = 3.0;
-     let mut aggression_weight: f32 = 1.0;
- 
-     // 根据游戏模式调整权重
-     GAME_MODE.with(|mode| {
-         if let Some(mode) = *mode.borrow() {
-             if mode == 3 {
-                 survival_weight = 10.0; // 4蛇模式加大生存权重
-             } 
-             if _snake_num == 2 {
-                 aggression_weight = 3.0; // 1v1模式且_snake_num为2时加大攻击权重
-             }
-         }
-     });
- 
+    let score_weight: f32 = 10.0;
+    let mut survival_weight: f32 = 1.0;
+    let mut aggression_weight: f32 = 10.0;
+
+    // 根据游戏模式调整权重
+    GAME_MODE.with(|mode| {
+        if let Some(mode) = *mode.borrow() {
+            if mode == 3 {
+                survival_weight = 10.0; // 4蛇模式加大生存权重
+            }
+            if _snake_num == 2 {
+                aggression_weight = 3.0; // 1v1模式且_snake_num为2时加大攻击权重
+            }
+        }
+    });
+
     let mut best_dir: i32 = 0;
     let mut best_score: f32 = -1e9;
     for (dir_idx, (dx, dy)) in dir_vecs.iter().enumerate() {

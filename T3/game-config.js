@@ -1,8 +1,8 @@
 // Import snake decision functions
 import { greedy_snake_step as snake1 } from './t3-snake-1-T800/pkg/t3_snake_1_T800.js';
 import { greedy_snake_step as snake2 } from './t3-snake-1-T800/pkg_x/release.js';
-import { greedy_snake_step as snake3 } from './t3-snake-1-T800/pkg2/t3_snake_1_T800.js';
-import { greedy_snake_step as snake4 } from './t3-snake-1-T800/pkg3/t3_snake_1_T800.js';
+import { greedy_snake_step as snake3 } from './t3-snake-1-T800/pkg_y/release.js';
+import { greedy_snake_step as snake4 } from './t3-snake-1-T800/pkg/t3_snake_1_T800.js';
 // import { greedy_snake_step as snake5 } from './t3-snake-{num}-{PL}/pkg/snake.js';
 // import { greedy_snake_step as snake6 } from './t3-snake-{num}-{PL}/pkg/snake.js';
 // import { greedy_snake_step as snake7 } from './t3-snake-{num}-{PL}/pkg/snake.js';
@@ -72,7 +72,7 @@ export const gameParameters = {
 
 // Random seed, can be undefined for random generation
 // Use BigInt for 64-bit seed support
-export const CUSTOM_SEED = BigInt("0x12345289ABCDEF0"); // Example: BigInt("0x123456789ABCDEF0")
+export const CUSTOM_SEED = BigInt("0x123456789ABCDEF0"); // Example: BigInt("0x123456789ABCDEF0")
 
 // Display configurations for more snakes
 export const SNAKE_DISPLAY_CONFIG = {
