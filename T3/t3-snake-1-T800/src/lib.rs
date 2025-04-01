@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::cell::RefCell;
 
 // 是否输出调试日志
-const LOG_ENABLED: bool = true;
+const LOG_ENABLED: bool = false;
 
 // 全局变量：保存其他蛇的历史轨迹（key：固定索引）
 thread_local! {
@@ -25,6 +25,12 @@ thread_local! {
 // 全局变量：保存上一回合敌蛇坐标（固定索引对应的蛇体坐标）
 thread_local! {
     static LAST_ENEMY_SNAKES: RefCell<HashMap<usize, Vec<(i32, i32)>>> = RefCell::new(HashMap::new());
+}
+
+// 全局变量：保存游戏模式（1v1 或 4 蛇对战）
+// 1 表示 1v1 模式，3 表示 4 蛇对战模式
+thread_local! {
+    static GAME_MODE: RefCell<Option<i32>> = RefCell::new(None);
 }
 
 // 辅助函数：将 (x,y) 转换为数组索引（棋盘坐标从 1 开始）
@@ -240,25 +246,51 @@ fn update_and_get_enemy_scores_with_mapping(
     });
     scores
 }
+/// 返回敌蛇累计目标得分，基于上一回合果子坐标；使用 mapping 确定固定索引
+fn get_enemy_scores_with_mapping(
+    other_heads: &Vec<(i32, i32, usize)>,
+    mapping: &Vec<usize>
+) -> Vec<f32> {
+    let mut scores = Vec::with_capacity(other_heads.len());
+    SNAKE_SCORES.with(|scores_map| {
+        let scores_map = scores_map.borrow();
+        for (i, &(_, _, _)) in other_heads.iter().enumerate() {
+            let assigned = mapping[i];
+            let cumulative = scores_map.get(&assigned).copied().unwrap_or(0.0);
+            scores.push(cumulative);
+        }
+    });
+    scores
+}
 
 /// 计算果子得分：若吃到果子则 +100，否则按曼哈顿距离扣分；对争夺果子和敌蛇预测优势情况加大扣分
-fn compute_food_score(new_head: (i32, i32), food_coords: &Vec<(i32, i32)>, contested_food: &Vec<bool>, enemy_dist: &Vec<i32>, eat: bool) -> f32 {
+/// 计算果子得分：若吃到果子则 +100，否则按曼哈顿距离扣分；
+/// 如果发现敌蛇到某个果子的距离小于或等于我方到果子的距离，则对该果子施加额外惩罚，
+fn compute_food_score(
+    new_head: (i32, i32),
+    food_coords: &Vec<(i32, i32)>,
+    _contested_food: &Vec<bool>, // 此处保留参数，但在本修改中未单独使用
+    enemy_dist: &Vec<i32>,
+    eat: bool
+) -> f32 {
     let mut score = 0.0;
     if eat {
         score += 100.0;
     } else if !food_coords.is_empty() {
         let mut min_dist = i32::MAX;
         for (i, &(fx, fy)) in food_coords.iter().enumerate() {
-            let dist = (new_head.0 - fx).abs() + (new_head.1 - fy).abs();
-            if contested_food.get(i).copied().unwrap_or(false) {
-                score += -3.0 * dist as f32;
+            let my_dist = (new_head.0 - fx).abs() + (new_head.1 - fy).abs();
+            let enemy_d = enemy_dist.get(i).copied().unwrap_or(i32::MAX);
+            if enemy_d <= my_dist {
+                // 敌蛇距离更近或同样距离
+                let diff = my_dist - enemy_d; // 差值越大，惩罚越重
+                let penalty = my_dist as f32 * (1.0 + diff as f32);
+                score += -penalty;
             } else {
-                if dist < min_dist {
-                    min_dist = dist;
+                if my_dist < min_dist {
+                    min_dist = my_dist;
                 }
-                if enemy_dist.get(i).copied().unwrap_or(i32::MAX) < dist {
-                    score += -dist as f32;
-                }
+                score += -my_dist as f32;
             }
         }
         if min_dist != i32::MAX {
@@ -267,6 +299,7 @@ fn compute_food_score(new_head: (i32, i32), food_coords: &Vec<(i32, i32)>, conte
     }
     score
 }
+
 
 /// 使用洪水填充计算从 start 出发的可活动区域面积
 fn compute_free_space(start: (i32, i32), obstacles: &Vec<bool>, n: i32, board_size: usize) -> i32 {
@@ -374,7 +407,7 @@ fn compute_aggression_score(
     let mut aggression_score = 0.0;
     let free_space_threshold = 3;
     let my_cumulative = MY_SCORE.with(|ms| *ms.borrow());
-    let enemy_scores = update_and_get_enemy_scores_with_mapping(other_heads, last_food_coords, mapping);
+    let enemy_scores = get_enemy_scores_with_mapping(other_heads, mapping);
     // 场景1：同归于尽机会
     for (&enemy_score, &(hx, hy, _)) in enemy_scores.iter().zip(other_heads.iter()) {
         if LOG_ENABLED {
@@ -417,6 +450,17 @@ pub fn greedy_snake_step(
     foods: Vec<i32>,
     round: i32
 ) -> i32 {
+     // 初始化游戏模式
+
+    GAME_MODE.with(|mode| {
+        let mut mode = mode.borrow_mut();
+        if mode.is_none() {
+            *mode = Some(_snake_num);
+        }
+        console::log_1(&format!("[GAME_MODE] Initialized: {:?}", *mode).into());
+    });
+    
+
     let board_size = n as usize;
     if LOG_ENABLED {
         console::log_1(&format!("[INPUT] Board size: {}", n).into());
